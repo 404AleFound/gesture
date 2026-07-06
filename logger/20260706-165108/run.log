@@ -1,0 +1,88 @@
+2026-07-06 16:51:08,960 | INFO  | run | source: data/gestures-20260706-151046.jsonl
+2026-07-06 16:51:08,960 | INFO  | run | run dir: logger/20260706-165108
+2026-07-06 16:51:09,038 | INFO  | run | loaded GestureDataset(n=612, n_features=18, class_counts={'LEFT_INDEX': 170, 'LEFT_THUMB': 120, 'RIGHT_INDEX': 161, 'RIGHT_THUMB': 161})
+2026-07-06 16:51:09,047 | INFO  | run | === phase: train ===
+2026-07-06 16:51:09,048 | INFO  | train | training DecisionTree...
+2026-07-06 16:51:09,249 | INFO  | train | training RandomForest...
+2026-07-06 16:51:09,352 | INFO  | train | training NaiveBayes...
+2026-07-06 16:51:09,356 | INFO  | train | training MLP...
+2026-07-06 16:51:10,897 | INFO  | train | training kNN...
+2026-07-06 16:51:10,899 | INFO  | run | === phase: eval ===
+2026-07-06 16:51:10,899 | INFO  | eval | evaluating DecisionTree...
+2026-07-06 16:51:10,922 | INFO  | eval | evaluating RandomForest...
+2026-07-06 16:51:11,296 | INFO  | eval | evaluating NaiveBayes...
+2026-07-06 16:51:11,308 | INFO  | eval | evaluating MLP...
+2026-07-06 16:51:15,385 | INFO  | eval | evaluating kNN...
+2026-07-06 16:51:15,441 | INFO  | report | 
+============================================
+classifier    acc_mean  acc_std  folds
+--------------------------------------------
+MLP           0.9575    0.0228  [0.951 0.959 0.984 0.918 0.975]
+RandomForest  0.9510    0.0136  [0.959 0.935 0.959 0.934 0.967]
+kNN           0.9363    0.0240  [0.927 0.943 0.934 0.902 0.975]
+DecisionTree  0.9134    0.0167  [0.911 0.902 0.943 0.918 0.893]
+NaiveBayes    0.6126    0.0374  [0.675 0.634 0.598 0.574 0.582]
+============================================
+2026-07-06 16:51:15,441 | INFO  | report | 
+### DecisionTree  (acc = 0.9134 ± 0.0167)
+              precision    recall  f1-score   support
+
+  LEFT_INDEX      0.922     0.971     0.946       170
+  LEFT_THUMB      0.956     0.900     0.927       120
+ RIGHT_INDEX      0.903     0.870     0.886       161
+ RIGHT_THUMB      0.885     0.907     0.896       161
+
+    accuracy                          0.913       612
+   macro avg      0.916     0.912     0.914       612
+weighted avg      0.914     0.913     0.913       612
+2026-07-06 16:51:15,441 | INFO  | report | 
+### RandomForest  (acc = 0.9510 ± 0.0136)
+              precision    recall  f1-score   support
+
+  LEFT_INDEX      0.958     0.947     0.953       170
+  LEFT_THUMB      0.942     0.942     0.942       120
+ RIGHT_INDEX      0.962     0.944     0.953       161
+ RIGHT_THUMB      0.940     0.969     0.954       161
+
+    accuracy                          0.951       612
+   macro avg      0.950     0.950     0.950       612
+weighted avg      0.951     0.951     0.951       612
+2026-07-06 16:51:15,441 | INFO  | report | 
+### NaiveBayes  (acc = 0.6126 ± 0.0374)
+              precision    recall  f1-score   support
+
+  LEFT_INDEX      0.455     0.924     0.610       170
+  LEFT_THUMB      0.787     0.617     0.692       120
+ RIGHT_INDEX      0.890     0.404     0.556       161
+ RIGHT_THUMB      0.790     0.491     0.605       161
+
+    accuracy                          0.613       612
+   macro avg      0.731     0.609     0.616       612
+weighted avg      0.723     0.613     0.610       612
+2026-07-06 16:51:15,441 | INFO  | report | 
+### MLP  (acc = 0.9575 ± 0.0228)
+              precision    recall  f1-score   support
+
+  LEFT_INDEX      0.982     0.976     0.979       170
+  LEFT_THUMB      0.967     0.967     0.967       120
+ RIGHT_INDEX      0.950     0.938     0.944       161
+ RIGHT_THUMB      0.933     0.950     0.942       161
+
+    accuracy                          0.958       612
+   macro avg      0.958     0.958     0.958       612
+weighted avg      0.958     0.958     0.958       612
+2026-07-06 16:51:15,441 | INFO  | report | 
+### kNN  (acc = 0.9363 ± 0.0240)
+              precision    recall  f1-score   support
+
+  LEFT_INDEX      0.964     0.953     0.959       170
+  LEFT_THUMB      0.967     0.975     0.971       120
+ RIGHT_INDEX      0.929     0.888     0.908       161
+ RIGHT_THUMB      0.893     0.938     0.915       161
+
+    accuracy                          0.936       612
+   macro avg      0.938     0.939     0.938       612
+weighted avg      0.937     0.936     0.936       612
+2026-07-06 16:51:16,248 | INFO  | run | === phase: plot ===
+2026-07-06 16:51:26,066 | INFO  | run | figures written to logger/20260706-165108/plots/
+2026-07-06 16:51:26,066 | INFO  | run | run saved: logger/20260706-165108 (latest -> logger/latest)

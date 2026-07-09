@@ -11,9 +11,7 @@ importances.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 
@@ -21,10 +19,7 @@ from gesture import (
     ALL_MODELS,
     Classifier,
     GestureDataset,
-    current_run_dir,
-    finalize_run_logger,
     get_logger,
-    install_run_logger,
 )
 
 
@@ -124,70 +119,16 @@ def evaluate(
 
 
 def evaluate_all(
-    dataset: GestureDataset, seed: int = 0,
+    dataset: GestureDataset,
+    seed: int = 0,
+    models: list[Classifier] | None = None,
 ) -> dict[str, ClassifierResult]:
-    """Run every registered model through 5-fold CV and collect results."""
+    """Run the given models through 5-fold CV and collect results.
+
+    `models` defaults to ALL_MODELS when omitted.
+    """
     results: dict[str, ClassifierResult] = {}
-    for model in ALL_MODELS:
+    for model in (models if models is not None else ALL_MODELS):
         _log.info("evaluating %s...", model.name)
         results[model.name] = evaluate(model, dataset, seed=seed)
     return results
-
-
-def evaluate_and_report(
-    dataset: GestureDataset,
-    figs_dir: str | Path,
-    seed: int = 0,
-) -> dict[str, ClassifierResult]:
-    """Business step: run CV, log reports, save figures. Logger-agnostic.
-
-    Assumes the caller has already installed a run logger; this function
-    just emits `_log.info(...)` and writes figures under `figs_dir`.
-    Returns the results dict for further use.
-    """
-    from report import log_leaderboard, log_full_reports
-    from gesture.plots import plot_classifier_results
-
-    results = evaluate_all(dataset, seed=seed)
-    log_leaderboard(results)
-    log_full_reports(results)
-    plot_classifier_results(results, out_dir=figs_dir)
-    return results
-
-
-# ---------- entry ----------
-
-
-def run(
-    jsonl_path: str | Path,
-    log_dir: str | Path = "logger",
-) -> Path:
-    """Load data, evaluate every model, log reports, plot figures.
-
-    Every artifact for this run lands under `<log_dir>/<timestamp>/`:
-
-        eval.log              -- full text log
-        figs/                 -- confusion matrices + feature importances
-
-    A `<log_dir>/latest` symlink is refreshed to point at that directory.
-    Returns the run directory path.
-    """
-    run_dir = install_run_logger("eval", log_dir=log_dir)
-    _log.info("source: %s", jsonl_path)
-    _log.info("run dir: %s", run_dir)
-
-    dataset = GestureDataset.from_jsonl(jsonl_path)
-    _log.info("loaded %r", dataset)
-
-    evaluate_and_report(dataset, figs_dir=run_dir / "figs")
-
-    latest = finalize_run_logger(log_dir=log_dir)
-    _log.info("run saved: %s (latest -> %s)", run_dir, latest)
-    return run_dir
-
-
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("usage: python eval.py <file.jsonl>", file=sys.stderr)
-        sys.exit(1)
-    run(sys.argv[1])

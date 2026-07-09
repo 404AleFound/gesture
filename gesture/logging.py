@@ -12,18 +12,17 @@ The whole run stores its artifacts in that timestamp directory:
     └── 20260706-120400/
         ├── eval.log
         ├── models/          (train.py drops joblibs here)
+        ├── kotlin/          (export.py drops .kt files here)
         └── figs/            (plot.py / eval.py write figures here)
 
-On graceful exit call `finalize_run_logger()` to create/update a
-`logger/latest` symlink pointing at the current run so downstream
-scripts can always find the freshest artifacts.
+There is no `latest` symlink -- each run stands on its own so a stale
+export cannot silently pair up with a newer training run.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -78,37 +77,6 @@ def install_run_logger(
 
     _current_run_dir = run_dir
     return run_dir
-
-
-def finalize_run_logger(log_dir: str | Path = "logger") -> Path | None:
-    """Point `<log_dir>/latest` symlink at the current run directory.
-
-    On systems that reject symlinks (Windows without dev mode) we fall
-    back to writing a `latest.txt` pointer file with the run dir path.
-    Returns the symlink/pointer path (or None if no run is installed).
-    """
-    if _current_run_dir is None:
-        return None
-    for h in logging.getLogger().handlers:
-        h.flush()
-
-    log_dir = Path(log_dir)
-    latest = log_dir / "latest"
-
-    # Target is stored as a relative path so `logger/` stays portable even
-    # if the whole tree is moved elsewhere.
-    target = _current_run_dir.name
-
-    try:
-        if latest.is_symlink() or latest.exists():
-            latest.unlink()
-        os.symlink(target, latest, target_is_directory=True)
-        return latest
-    except OSError:
-        # Filesystem doesn't allow symlinks -- degrade to a text pointer.
-        pointer = log_dir / "latest.txt"
-        pointer.write_text(str(_current_run_dir), encoding="utf-8")
-        return pointer
 
 
 def current_run_dir() -> Path:

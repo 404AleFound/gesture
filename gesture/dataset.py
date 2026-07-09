@@ -1,33 +1,14 @@
-"""Feature dataset assembled from Scroll records.
-
-GestureDataset turns a list[Scroll] into the (X, y) matrices that sklearn
-classifiers consume. It's the single place that owns the "which columns
-live in the feature vector" decision, so any classifier script can just:
-
-    ds = GestureDataset.from_jsonl("data/gestures-....jsonl")
-    clf.fit(ds.X, ds.y)
-"""
-
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
-
 import numpy as np
-
 from gesture.scrolls import DIRECTIONS, GESTURES, Scroll, load_scrolls
 from gesture.feature import compute
 
 
 # ---------- label modes ----------
-
-# Two ways to derive y from Scroll.tag:
-#   "hand"    -> collapse LEFT_*/RIGHT_* to LEFT_HAND/RIGHT_HAND
-#                (main classification task: which hand the user is using)
-#   "gesture" -> keep all 4 raw tags (fine-grained gesture identity,
-#                mostly useful for data exploration and feature plots)
 HAND_LABELS: tuple[str, ...] = ("LEFT_HAND", "RIGHT_HAND")
+HAND1_LABELS: tuple[str, ...] = ("LEFT_HAND", "MID_HAND", "RIGHT_HAND")
 
 _TAG_TO_HAND = {
     "LEFT_THUMB":  "LEFT_HAND",
@@ -36,12 +17,31 @@ _TAG_TO_HAND = {
     "RIGHT_INDEX": "RIGHT_HAND",
 }
 
+_TAG_TO_HAND_1 = {
+    "LEFT_THUMB":  "LEFT_HAND",
+    "LEFT_INDEX":  "MID_HAND",
+    "RIGHT_THUMB": "RIGHT_HAND",
+    "RIGHT_INDEX": "MID_HAND",
+}
+
+# 多任务级联的头 A: 单手/双手 (拇指=单手, 食指=双手).
+HOLDMODE_LABELS: tuple[str, ...] = ("ONE_HAND", "TWO_HAND")
+_TAG_TO_HOLDMODE = {
+    "LEFT_THUMB":  "ONE_HAND",
+    "RIGHT_THUMB": "ONE_HAND",
+    "LEFT_INDEX":  "TWO_HAND",
+    "RIGHT_INDEX": "TWO_HAND",
+}
 
 def _label_of(scroll: Scroll, mode: str) -> str:
     if mode == "hand":
         return _TAG_TO_HAND[scroll.tag]
     if mode == "gesture":
         return scroll.tag
+    if mode == "hand1":
+        return _TAG_TO_HAND_1[scroll.tag]
+    if mode == "holdmode":
+        return _TAG_TO_HOLDMODE[scroll.tag]
     raise ValueError(f"unknown label mode: {mode!r}")
 
 
@@ -50,21 +50,37 @@ def _label_of(scroll: Scroll, mode: str) -> str:
 # Continuous features taken straight off the Features dataclass, in the
 # order they will appear in each training row.
 FEATURE_NAMES: tuple[str, ...] = (
-    "length",
+    "length", # 轨迹总长度
 
-    "disp_total_dx", 
-    "disp_total_dy", 
-    "disp_max_dx", 
-    "disp_max_dy",
+    "disp_total_dx", # 轨迹 X 方向总位移
+    "disp_total_dy", # 轨迹 Y 方向总位移
+    "disp_max_dx", # 轨迹 X 方向最大位移跨度
+    "disp_max_dy", # 轨迹 Y 方向最大位移跨度
 
-    "velocity_max", 
-    "velocity_mean", 
-    "velocity_std",
+    "velocity_max", # 轨迹最大速率
+    "velocity_mean", # 轨迹速率平均值
+    "velocity_std", # 轨迹速率的标准差
 
-    "curvature_rmse", 
-    "curvature_max", 
-    "curvature_mean",
-    "convex_orientation",
+    "curvature_rmse", # 曲率的均方根误差
+    "curvature_max", # 曲率的最大值
+    "curvature_mean", # 曲率的平均值
+    "convex_orientation", # 轨迹凸出的朝向
+    "straightness", # 弦长 / 路径长, ∈ (0, 1], 越接近 1 越直
+    "direction_change", # 首段与末段运动向量的夹角, ∈ [0, π]
+
+    "position_begin_x", # 初始轨迹点的 X 坐标
+    "position_begin_y", # 初始轨迹点的 Y 坐标
+    "position_end_x", # 终止轨迹点的 X 坐标
+    "position_end_y", # 终止轨迹点的 Y 坐标
+
+    "duration", # 手势总时长
+    "velocity_peak_position", # 峰速出现的相对位置, ∈ [0, 1]
+
+    "velocity_cv", # velocity_std / velocity_mean, 变异系数, 说明"匀速 vs 突刺"
+    "velocity_burst", # velocity_max / velocity_mean, 峰值/均值, 说明"爆发性"
+    # "disp_ratio_x", # disp_total_dx / length, 净 X 位移占路径长, ∈ [-1, 1]
+    # "disp_ratio_y", # disp_total_dy / length, 净 Y 位移占路径长, ∈ [-1, 1]
+    "bbox_aspect", # disp_max_dx / (disp_max_dx + disp_max_dy), 包围盒横竖占比 ∈ [0, 1]
 )
 
 
@@ -112,7 +128,12 @@ class GestureDataset:
             ys.append(_label_of(scroll, label_mode))
         if not rows:
             raise ValueError("GestureDataset needs at least one scroll")
-        labels = list(HAND_LABELS) if label_mode == "hand" else sorted(GESTURES)
+        labels = {
+            "hand":     list(HAND_LABELS),
+            "hand1":    list(HAND1_LABELS),
+            "gesture":  sorted(GESTURES),
+            "holdmode": list(HOLDMODE_LABELS),
+        }[label_mode]
         return cls(
             X=np.asarray(rows, dtype=float),
             y=np.asarray(ys),

@@ -28,7 +28,7 @@ class RandomForest(Classifier):
     def build(self, seed: int = 0):
         from sklearn.ensemble import RandomForestClassifier
         return RandomForestClassifier(
-            n_estimators=20, random_state=seed, n_jobs=-1,
+            n_estimators=6, random_state=seed, n_jobs=-1,
         )
 
 

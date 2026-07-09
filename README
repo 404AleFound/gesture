@@ -9,16 +9,70 @@ Link: https://pmc.ncbi.nlm.nih.gov/articles/PMC5017479/
 
 # 数据:
 
-在自研 iOS 采集应用中记录用户的滑动手势,每条记录包含轨迹点序列 (t, x, y)、手势模式标签(4 类)、时间戳等。方向标签(上/下/左/右)由首末点位移推断。
+在自研 iOS 采集应用中记录用户的滑动手势,每条记录包含轨迹点序列 (t, x, y)、手势模式标签(4 类:LEFT_INDEX / LEFT_THUMB / RIGHT_INDEX / RIGHT_THUMB)、时间戳等。方向标签(上/下/左/右)由首末点位移推断。坐标输入前已归一化到 [0, 1]。
 
 
 # 范围:
 
 - 轨迹存储与可视化
-- 每条轨迹提取 16 维特征(长度、速度、位移、形状),按手势模式与方向做分布可视化
-- 训练分类器识别手势模式(暂缓)
-- 分类算法评估(暂缓)
+- 从每条轨迹提取多维特征(长度、位移、速度、形状、位置、时间),按手势模式与方向做分布可视化
+- 训练分类器识别手势模式(DecisionTree / RandomForest / NaiveBayes / MLP / kNN)
+- 5 折分层交叉验证的分类算法评估
+- 将 RandomForest 导出为纯 Kotlin 代码用于 Android 端推理
+
+
+# 特征:
+
+`gesture/feature.py` 里 `Features` 数据类定义了 20 个候选特征;`gesture/dataset.py` 中的 `FEATURE_NAMES` 白名单决定哪些进入训练矩阵——注释一行即可开关一个特征,方便做消融实验。分组如下:
+
+- 长度: `length`
+- 位移: `disp_total_dx/dy`, `disp_max_dx/dy`
+- 速度: `velocity_max/mean/std`
+- 形状: `curvature_rmse/max/mean`, `convex_orientation`, `straightness`, `direction_change`
+- 位置: `position_begin_x/y`, `position_end_x/y`
+- 时间: `duration`, `velocity_peak_position`
+
+每个特征计算函数都带 doctest,用 `python -c "import doctest; from gesture import feature; doctest.testmod(feature)"` 跑一遍。
+
+
+# 使用:
+
+一键端到端(训练 + 评估 + 绘图):
+
+```
+python run.py data/gestures-....jsonl                     # 跑所有模型
+python run.py data/gestures-....jsonl --models RandomForest MLP   # 选择模型子集
+```
+
+`run.py` 会在训练前打印当前生效的特征列表,并把所有产物写入一个时间戳目录:
+
+```
+logger/<timestamp>/
+├── run.log
+├── models/*.joblib + metadata.json
+├── figs/                 (分类器结果: 混淆矩阵、特征重要性)
+└── plots/                (轨迹相关: scrolls, features, distribution)
+```
+
+`logger/latest` 软链接始终指向最近一次运行。
+
+单独训练也可以:
+
+```
+python train.py data/gestures-....jsonl
+```
+
+将某个已训练好的 RandomForest 导出为 Kotlin:
+
+```
+python export.py logger/latest/models/RandomForest.joblib \
+    [--out GestureRandomForest.kt] [--package dev.gc.gesture]
+```
+
 
 # 输出:
 
-归一化坐标下的特征分布图,用于验证不同手势模式在各特征上的可分性,为下一步分类模型选型提供依据。
+- `figs/`: 每个分类器的混淆矩阵、特征重要性图
+- `plots/`: 归一化坐标下的轨迹与特征分布图,用于验证不同手势模式在各特征上的可分性
+- `models/`: 训练好的 sklearn Pipeline(StandardScaler + estimator)`.joblib` 文件
+- `run.log`: 完整文本日志,含 leaderboard 与 sklearn 的 per-class classification report

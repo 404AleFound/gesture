@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass
 import numpy as np
 from gesture.scrolls import Scroll, PathPoint
+import doctest
 
 @dataclass
 class Features:
@@ -29,16 +30,53 @@ class Features:
     curvature_max: float # 曲率的最大值
     curvature_mean: float # 曲率的平均值
     convex_orientation: int # 轨迹凸出的朝向
+    straightness: float # 弦长 / 路径长, ∈ (0, 1], 越接近 1 越直
+    direction_change: float # 首段与末段运动向量的夹角, ∈ [0, π]
+    '''
+    位置特征
+    '''
+    position_begin_x: float # 初始轨迹点的 X 坐标
+    position_begin_y: float # 初始轨迹点的 Y 坐标
+    position_end_x: float # 终止轨迹点的 X 坐标
+    position_end_y: float # 终止轨迹点的 Y 坐标
+    '''
+    时间特征
+    '''
+    duration: float # 手势总时长
+    velocity_peak_position: float # 峰速出现的相对位置, ∈ [0, 1]
+    '''
+    候选相对特征 (默认不在 FEATURE_NAMES, 用作 A/B 备选).
+    绝对量的短板是会随用户滑动快慢/屏幕总长整体缩放, 这里预先算好相对形态,
+    在 dataset.py 的白名单里加进去即可参与训练.
+    '''
+    velocity_cv: float # velocity_std / velocity_mean, 变异系数, 说明"匀速 vs 突刺"
+    velocity_burst: float # velocity_max / velocity_mean, 峰值/均值, 说明"爆发性"
+    disp_ratio_x: float # disp_total_dx / length, 净 X 位移占路径长, ∈ [-1, 1]
+    disp_ratio_y: float # disp_total_dy / length, 净 Y 位移占路径长, ∈ [-1, 1]
+    bbox_aspect: float # disp_max_dx / (disp_max_dx + disp_max_dy), 包围盒横竖占比 ∈ [0, 1]
 
 
-
-def _length(path: list[PathPoint]) -> float:
+def _length_stats(path: list[PathPoint]) -> float:
+    """
+    >>> from gesture.scrolls import PathPoint as P
+    >>> _length_stats([P(0, 0.0, 0.0), P(1, 3.0, 4.0)])
+    5.0
+    >>> _length_stats([])
+    0.0
+    """
     total = 0.0
     for a, b in zip(path, path[1:]):
         total += math.hypot(b.x - a.x, b.y - a.y)
     return total
 
-def _displacement_stats(path: list[PathPoint]) -> tuple[float, float, float, float]:
+def _displacement_stats(path: list[PathPoint]) -> tuple[float, ...]:
+    """
+    >>> from gesture.scrolls import PathPoint as P
+    >>> _displacement_stats([P(0, 0.0, 0.0), P(1, 1.0, 2.0), P(2, 3.0, 1.0)])
+    (3.0, 1.0, 3.0, 2.0)
+    >>> _displacement_stats([P(0, 0.5, 0.5)])
+    (0.0, 0.0, 0.0, 0.0)
+    """
     if len(path) < 2:
         return 0.0, 0.0, 0.0, 0.0
     x_first = path[0].x
@@ -56,6 +94,13 @@ def _displacement_stats(path: list[PathPoint]) -> tuple[float, float, float, flo
 
 
 def velocities(path: list[PathPoint]) -> list[float]:
+    """
+    >>> from gesture.scrolls import PathPoint as P
+    >>> velocities([P(0, 0.0, 0.0), P(2, 3.0, 4.0), P(2, 5.0, 5.0)])
+    [2.5]
+    >>> velocities([P(0, 0.0, 0.0)])
+    []
+    """
     result: list[float] = []
     for a, b in zip(path, path[1:]):
         dt = b.t - a.t
@@ -66,12 +111,12 @@ def velocities(path: list[PathPoint]) -> list[float]:
 
 
 def _velocity_stats(path: list[PathPoint]) -> tuple[float, float, float]:
-    """Return (v_max, v_mean, v_std).
-
-    v_mean is the time-weighted average = total_length / total_duration,
-    matching the spec in tasks.md and avoiding sampling-rate bias. When
-    the total duration is zero (bad data), fall back to the arithmetic
-    mean of the per-segment velocities.
+    """
+    >>> from gesture.scrolls import PathPoint as P
+    >>> _velocity_stats([P(0, 0.0, 0.0), P(1, 1.0, 0.0), P(3, 3.0, 0.0)])
+    (1.0, 1.0, 0.0)
+    >>> _velocity_stats([])
+    (0.0, 0.0, 0.0)
     """
     vs = velocities(path)
     if not vs:
@@ -79,7 +124,7 @@ def _velocity_stats(path: list[PathPoint]) -> tuple[float, float, float]:
     v_max = max(vs)
     total_duration = path[-1].t - path[0].t
     if total_duration > 0:
-        v_mean = _length(path) / total_duration
+        v_mean = _length_stats(path) / total_duration
     else:
         v_mean = sum(vs) / len(vs)
     v_std = math.sqrt(sum((v - v_mean) ** 2 for v in vs) / len(vs))
@@ -87,11 +132,6 @@ def _velocity_stats(path: list[PathPoint]) -> tuple[float, float, float]:
 
 
 def _rotate_to_principal_axis(path: list[PathPoint]) -> tuple[np.ndarray, np.ndarray]:
-    """Rotate coordinates so first->last vector aligns with +x axis.
-
-    Returns (u, v) where u is the coordinate along the principal axis and v
-    is perpendicular. This makes f(u) well-defined for polynomial fitting.
-    """
     if len(path) < 2:
         return np.array([p.x for p in path]), np.array([p.y for p in path])
     xs = np.array([p.x for p in path])
@@ -112,11 +152,6 @@ MIN_FIT_SPAN = 0.05
 
 
 def _fit_polynomial(path: list[PathPoint], degree: int = 4):
-    """Fit v = p(u) in the rotated frame.
-
-    Returns (u, v, poly) where poly is a numpy.polynomial.Polynomial object,
-    or None if the path is too short to fit reliably.
-    """
     if len(path) < degree + 2:
         return None
     u, v = _rotate_to_principal_axis(path)
@@ -127,23 +162,12 @@ def _fit_polynomial(path: list[PathPoint], degree: int = 4):
 
 
 def _curvatures_from_fit(u: np.ndarray, poly) -> np.ndarray:
-    """Per-sample signed curvature given an already-fitted polynomial.
-
-    Split out so that `_curvatures` and `_shape_stats` share the derivative
-    + curvature formula without either function duplicating it.
-    """
     fp = poly.deriv(1)(u)
     fpp = poly.deriv(2)(u)
     return fpp / np.power(1.0 + fp ** 2, 1.5)
 
 
 def curvatures(path: list[PathPoint]) -> np.ndarray:
-    """Per-sample signed curvature. Empty array if the fit is undefined.
-
-    plots.py uses this for per-sample curvature curves. Aggregated shape
-    features go through `_shape_stats`, which fits the polynomial only
-    once and computes RMSE + curvature stats + CCO together.
-    """
     fit = _fit_polynomial(path)
     if fit is None:
         return np.array([])
@@ -154,18 +178,13 @@ def curvatures(path: list[PathPoint]) -> np.ndarray:
 def _shape_stats(
     path: list[PathPoint], eps: float = 1e-6,
 ) -> tuple[float, float, float, int]:
-    """Return (rmse, curvature_max, curvature_mean, convex_orientation).
-
-    All four shape features derive from the same rotated-frame polynomial
-    fit, so this function fits once and computes them together.
-
-    - rmse: residual std of the poly-fit, i.e. how "jittery" the trajectory
-      is relative to a smooth curve.
-    - curvature_max / mean: |κ| over the samples.
-    - convex_orientation: three-point cross-product sign in {-1, 0, +1},
-      normalized by the primary motion axis so the label is stable under
-      swipe direction. 0 means the trajectory is too close to a line to
-      decide.
+    """
+    >>> from gesture.scrolls import PathPoint as P
+    >>> _shape_stats([P(0, 0.0, 0.0), P(1, 0.5, 0.0), P(2, 1.0, 0.0)])
+    (0.0, 0.0, 0.0, 0)
+    >>> _, _, _, cco = _shape_stats([P(0, 0.0, 0.0), P(1, 0.5, 0.2), P(2, 1.0, 0.0)])
+    >>> cco
+    -1
     """
     # --- polynomial-fit based features -------------------------------
     fit = _fit_polynomial(path)
@@ -196,14 +215,99 @@ def _shape_stats(
 
     return rmse_val, k_max, k_mean, cco
 
+def _position_stats(path: list[PathPoint]) -> tuple[float, float, float, float]:
+    """
+    >>> from gesture.scrolls import PathPoint as P
+    >>> _position_stats([P(0, 0.1, 0.2), P(1, 0.5, 0.6), P(2, 0.9, 0.4)])
+    (0.1, 0.2, 0.9, 0.4)
+    >>> _position_stats([])
+    (0.0, 0.0, 0.0, 0.0)
+    """
+    if not path:
+        return 0.0, 0.0, 0.0, 0.0
+    return path[0].x, path[0].y, path[-1].x, path[-1].y
+
+
+def _straightness(path: list[PathPoint], length: float, eps: float = 1e-9) -> float:
+    """
+    >>> from gesture.scrolls import PathPoint as P
+    >>> _straightness([P(0, 0.0, 0.0), P(1, 1.0, 0.0), P(2, 2.0, 0.0)], length=2.0)
+    1.0
+    >>> round(_straightness([P(0, 0.0, 0.0), P(1, 1.0, 1.0), P(2, 2.0, 0.0)], length=math.sqrt(8)), 4)
+    0.7071
+    >>> _straightness([], length=0.0)
+    0.0
+    """
+    if len(path) < 2 or length <= eps:
+        return 0.0
+    chord = math.hypot(path[-1].x - path[0].x, path[-1].y - path[0].y)
+    return chord / length
+
+
+def _direction_change(path: list[PathPoint], eps: float = 1e-9) -> float:
+    """
+    >>> from gesture.scrolls import PathPoint as P
+    >>> _direction_change([P(0, 0.0, 0.0), P(1, 1.0, 0.0), P(2, 2.0, 0.0)])
+    0.0
+    >>> round(_direction_change([P(0, 0.0, 0.0), P(1, 1.0, 0.0), P(2, 1.0, 1.0)]), 4)
+    1.5708
+    >>> _direction_change([P(0, 0.0, 0.0), P(1, 1.0, 0.0)])
+    0.0
+    """
+    if len(path) < 3:
+        return 0.0
+    ax, ay = path[1].x - path[0].x, path[1].y - path[0].y
+    bx, by = path[-1].x - path[-2].x, path[-1].y - path[-2].y
+    na = math.hypot(ax, ay)
+    nb = math.hypot(bx, by)
+    if na < eps or nb < eps:
+        return 0.0
+    cos_t = max(-1.0, min(1.0, (ax * bx + ay * by) / (na * nb)))
+    return math.acos(cos_t)
+
+
+def _time_stats(path: list[PathPoint]) -> tuple[float, float]:
+    """
+    >>> from gesture.scrolls import PathPoint as P
+    >>> _time_stats([P(0, 0.0, 0.0), P(1, 1.0, 0.0), P(3, 5.0, 0.0)])
+    (3, 1.0)
+    >>> _time_stats([P(0, 0.0, 0.0)])
+    (0.0, 0.0)
+    """
+    if len(path) < 2:
+        return 0.0, 0.0
+    duration = path[-1].t - path[0].t
+    vs = velocities(path)
+    if not vs:
+        return max(duration, 0.0), 0.0
+    peak_idx = max(range(len(vs)), key=vs.__getitem__)
+    peak_pos = peak_idx / (len(vs) - 1) if len(vs) > 1 else 0.0
+    return max(duration, 0.0), peak_pos
+
+
+_EPS_REL = 1e-9
+
 
 def compute(scroll: Scroll) -> Features:
     path = scroll.path
+    length = _length_stats(path)
     v_max, v_mean, v_std = _velocity_stats(path)
     total_dx, total_dy, max_dx, max_dy = _displacement_stats(path)
     rmse_val, k_max, k_mean, cco = _shape_stats(path)
+    straight = _straightness(path, length)
+    dir_change = _direction_change(path)
+    begin_x, begin_y, end_x, end_y = _position_stats(path)
+    duration, v_peak_pos = _time_stats(path)
+
+    v_cv = v_std / v_mean if v_mean > _EPS_REL else 0.0
+    v_burst = v_max / v_mean if v_mean > _EPS_REL else 0.0
+    disp_x_ratio = total_dx / length if length > _EPS_REL else 0.0
+    disp_y_ratio = total_dy / length if length > _EPS_REL else 0.0
+    bbox_sum = max_dx + max_dy
+    bbox_aspect = max_dx / bbox_sum if bbox_sum > _EPS_REL else 0.0
+
     return Features(
-        length=_length(path),
+        length=length,
         disp_total_dx=total_dx,
         disp_total_dy=total_dy,
         disp_max_dx=max_dx,
@@ -215,4 +319,17 @@ def compute(scroll: Scroll) -> Features:
         curvature_max=k_max,
         curvature_mean=k_mean,
         convex_orientation=cco,
+        straightness=straight,
+        direction_change=dir_change,
+        position_begin_x=begin_x,
+        position_begin_y=begin_y,
+        position_end_x=end_x,
+        position_end_y=end_y,
+        duration=duration,
+        velocity_peak_position=v_peak_pos,
+        velocity_cv=v_cv,
+        velocity_burst=v_burst,
+        disp_ratio_x=disp_x_ratio,
+        disp_ratio_y=disp_y_ratio,
+        bbox_aspect=bbox_aspect,
     )

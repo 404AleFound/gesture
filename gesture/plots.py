@@ -1,13 +1,14 @@
 """All visualization code for the project.
 
-Four top-level entry points:
+Five top-level entry points:
 
-    plot_scrolls(scrolls, out_dir)              -- trajectory views
+    plot_scrolls(scrolls, out_dir)              -- trajectory views (aggregated)
+    plot_scrolls_by_mode(scrolls, out_dir)      -- one panel per (gesture, direction)
     plot_features(scrolls, out_dir)             -- feature boxplots
     plot_distributions(scrolls, out_dir)        -- velocity/curvature vs displacement
     plot_classifier_results(results, out_dir)   -- confusion matrices + importances
 
-`plot_all(scrolls, out_dir)` runs the first three in one go.
+`plot_all(scrolls, out_dir)` runs the first four in one go.
 """
 
 from __future__ import annotations
@@ -23,6 +24,16 @@ from .feature import Features, compute, curvatures, velocities
 
 if TYPE_CHECKING:
     from eval import ClassifierResult
+
+
+# Per-gesture color pair: (light background, dark foreground). Shared across
+# multiple views so a gesture is instantly identifiable by hue.
+_GESTURE_COLOR_PAIRS: dict[str, tuple[str, str]] = {
+    "LEFT_THUMB":  ("#a6cee3", "#1f6091"),
+    "LEFT_INDEX":  ("#b2df8a", "#33a02c"),
+    "RIGHT_THUMB": ("#fdbf6f", "#e37c1a"),
+    "RIGHT_INDEX": ("#fb9a99", "#c0392b"),
+}
 
 
 # ============================================================
@@ -93,6 +104,49 @@ def plot_scrolls(
         if show:
             plt.show()
         plt.close(fig)
+
+
+# ============================================================
+# 1b. Single-mode trajectory panels (one figure per gesture+direction)
+# ============================================================
+
+
+def plot_scrolls_by_mode(
+    scrolls: list[Scroll],
+    out_dir: str | Path = "figs/scrolls_by_mode",
+) -> None:
+    """Render one trajectory panel per (gesture, direction) pair.
+
+    The aggregated views in `plot_scrolls` overlay dozens of curves and
+    turn into visual mush at large N. Splitting on both axes at once
+    keeps each panel to a single mode so the typical shape stays legible;
+    plotting all curves with low alpha lets high-traffic regions self-
+    darken (a poor man's density heatmap).
+    """
+    import matplotlib.pyplot as plt
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    def setup(ax, title):
+        ax.set_xlim(0, 1); ax.set_ylim(1, 0); ax.set_aspect(IPHONE_ASPECT)
+        ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_title(title, fontsize=10)
+        ax.grid(True, linestyle=":", alpha=0.4)
+
+    for gesture in GESTURES:
+        light, dark = _GESTURE_COLOR_PAIRS[gesture]
+        for direction in DIRECTIONS:
+            subset = [s for s in scrolls if s.tag == gesture and s.direction == direction and s.path]
+            fig, ax = plt.subplots(figsize=(4.5, 4.5 * IPHONE_ASPECT / 2))
+            for s in subset:
+                xs = [p.x for p in s.path]; ys = [p.y for p in s.path]
+                ax.plot(xs, ys, color=light, alpha=0.35, linewidth=0.8)
+                ax.scatter([xs[0]], [ys[0]], color=dark, s=10, marker="o", alpha=0.6)
+                ax.scatter([xs[-1]], [ys[-1]], color=dark, s=10, marker="x", alpha=0.6)
+            setup(ax, f"{gesture} · {direction}  (n={len(subset)})")
+            fig.tight_layout()
+            fig.savefig(out_dir / f"{gesture}_{direction}.png", dpi=150, bbox_inches="tight")
+            plt.close(fig)
 
 
 # ============================================================
@@ -224,14 +278,6 @@ def plot_features(
 # ============================================================
 # 3. Velocity/curvature distributions vs displacement
 # ============================================================
-
-# Per-gesture color pair: (light background, dark foreground).
-_GESTURE_COLOR_PAIRS: dict[str, tuple[str, str]] = {
-    "LEFT_THUMB":  ("#a6cee3", "#1f6091"),
-    "LEFT_INDEX":  ("#b2df8a", "#33a02c"),
-    "RIGHT_THUMB": ("#fdbf6f", "#e37c1a"),
-    "RIGHT_INDEX": ("#fb9a99", "#c0392b"),
-}
 
 _N_BINS = 40
 
@@ -476,9 +522,11 @@ def _plot_feature_importances(results, out_path: Path) -> None:
 # ============================================================
 
 
-def plot_all(scrolls: list[Scroll], out_root: str | Path = "figs") -> None:
+def plot_all(scrolls: list[Scroll], out_root: str | Path = "figs", plot_scrolls_mode=False) -> None:
     root = Path(out_root)
     plot_scrolls(scrolls, out_dir=root / "scrolls")
+    if plot_scrolls_mode:
+        plot_scrolls_by_mode(scrolls, out_dir=root / "scrolls_by_mode")
     plot_features(scrolls, out_dir=root / "features")
     plot_distributions(scrolls, out_dir=root / "distribution")
 

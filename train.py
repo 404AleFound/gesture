@@ -11,8 +11,7 @@ CLI:
 Output layout:
     <out_dir>/<ModelName>.joblib     -- one per Classifier in ALL_MODELS
     <out_dir>/metadata.json          -- feature schema + provenance
-    logger/train-<timestamp>.txt     -- run log (leaderboard-free)
-    logger/latest.txt                -- most recent run's log
+    logger/<timestamp>/train.log     -- run log
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ from gesture import (
     Classifier,
     GestureDataset,
     current_run_dir,
-    finalize_run_logger,
     get_logger,
     install_run_logger,
 )
@@ -65,10 +63,12 @@ def train_all(
     out_dir: str | Path = "models",
     seed: int = 0,
     source_jsonl: str | Path | None = None,
+    models: list[Classifier] | None = None,
 ) -> dict[str, Path]:
-    """Train every model in ALL_MODELS and dump each to <out_dir>/<name>.joblib.
+    """Train the given models and dump each to <out_dir>/<name>.joblib.
 
-    Returns a mapping from model name to the joblib file path.
+    `models` defaults to ALL_MODELS when omitted. Returns a mapping from
+    model name to the joblib file path.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -77,7 +77,7 @@ def train_all(
     label_order = list(le.classes_)
 
     paths: dict[str, Path] = {}
-    for model in ALL_MODELS:
+    for model in (models if models is not None else ALL_MODELS):
         _log.info("training %s...", model.name)
         pipe = train_one(model, dataset, seed=seed)
         path = out_dir / f"{model.name}.joblib"
@@ -148,8 +148,7 @@ def main(argv: list[str] | None = None) -> None:
     for name, path in paths.items():
         _log.info("  %-14s -> %s", name, path)
 
-    latest = finalize_run_logger(log_dir=args.log_dir)
-    _log.info("run saved: %s (latest -> %s)", run_dir, latest)
+    _log.info("run saved: %s", run_dir)
 
 
 if __name__ == "__main__":

@@ -45,7 +45,6 @@ from .model import (
 )
 from .logging import (
     current_run_dir,
-    finalize_run_logger,
     get_logger,
     install_run_logger,
 )
@@ -75,7 +74,6 @@ __all__ = [
     "RandomForest",
     # logging
     "install_run_logger",
-    "finalize_run_logger",
     "current_run_dir",
     "get_logger",
 ]

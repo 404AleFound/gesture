@@ -50,37 +50,27 @@ def _label_of(scroll: Scroll, mode: str) -> str:
 # Continuous features taken straight off the Features dataclass, in the
 # order they will appear in each training row.
 FEATURE_NAMES: tuple[str, ...] = (
-    "length", # 轨迹总长度
 
-    "disp_total_dx", # 轨迹 X 方向总位移
-    "disp_total_dy", # 轨迹 Y 方向总位移
-    "disp_max_dx", # 轨迹 X 方向最大位移跨度
-    "disp_max_dy", # 轨迹 Y 方向最大位移跨度
+    "length",
 
-    "velocity_max", # 轨迹最大速率
-    "velocity_mean", # 轨迹速率平均值
-    "velocity_std", # 轨迹速率的标准差
+    "disp_total_dx",
+    "disp_total_dy",
+    "disp_max_dx",
+    "disp_max_dy",
 
-    "curvature_rmse", # 曲率的均方根误差
-    "curvature_max", # 曲率的最大值
-    "curvature_mean", # 曲率的平均值
-    "convex_orientation", # 轨迹凸出的朝向
-    "straightness", # 弦长 / 路径长, ∈ (0, 1], 越接近 1 越直
-    "direction_change", # 首段与末段运动向量的夹角, ∈ [0, π]
+    "velocity_max",
+    "velocity_mean",
+    "velocity_std",
 
-    "position_begin_x", # 初始轨迹点的 X 坐标
-    "position_begin_y", # 初始轨迹点的 Y 坐标
-    "position_end_x", # 终止轨迹点的 X 坐标
-    "position_end_y", # 终止轨迹点的 Y 坐标
+    "curvature_rmse",
+    "curvature_max",
+    "curvature_mean",
+    "convex_orientation",
 
-    "duration", # 手势总时长
-    "velocity_peak_position", # 峰速出现的相对位置, ∈ [0, 1]
-
-    "velocity_cv", # velocity_std / velocity_mean, 变异系数, 说明"匀速 vs 突刺"
-    "velocity_burst", # velocity_max / velocity_mean, 峰值/均值, 说明"爆发性"
-    # "disp_ratio_x", # disp_total_dx / length, 净 X 位移占路径长, ∈ [-1, 1]
-    # "disp_ratio_y", # disp_total_dy / length, 净 Y 位移占路径长, ∈ [-1, 1]
-    "bbox_aspect", # disp_max_dx / (disp_max_dx + disp_max_dy), 包围盒横竖占比 ∈ [0, 1]
+    "position_begin_x",
+    "position_begin_y",
+    "position_end_x",
+    "position_end_y",
 )
 
 

@@ -54,6 +54,9 @@ class Features:
     disp_ratio_x: float # disp_total_dx / length, 净 X 位移占路径长, ∈ [-1, 1]
     disp_ratio_y: float # disp_total_dy / length, 净 Y 位移占路径长, ∈ [-1, 1]
     bbox_aspect: float # disp_max_dx / (disp_max_dx + disp_max_dy), 包围盒横竖占比 ∈ [0, 1]
+    tail_velocity_ratio: float # 末 20% 时间段均速 / 全程均速, <1 减速, >1 加速
+    decel_time_ratio: float # (总时长 - 峰速时刻) / 总时长, 减速段占比 ∈ [0, 1]
+    ends_near_edge: int # 终点是否落在屏幕 5% 边缘带内 (0/1)
 
 
 def _length_stats(path: list[PathPoint]) -> float:
@@ -287,6 +290,85 @@ def _time_stats(path: list[PathPoint]) -> tuple[float, float]:
 
 _EPS_REL = 1e-9
 
+# 归一化坐标下, 视终点距 [0,1] 边界多近算"划到屏幕边".
+_EDGE_MARGIN = 0.05
+
+# tail_velocity_ratio 的"末段"定义: 时间轴最后 20%.
+_TAIL_FRAC = 0.20
+
+
+def _tail_velocity_ratio(path: list[PathPoint]) -> float:
+    """Mean speed over the last _TAIL_FRAC of the time axis, / mean speed overall.
+
+    < 1 = decelerating tail (typical for thumbs, gesture ends with a natural stop);
+    > 1 = accelerating tail (typical for index-finger flicks that slide off screen).
+    """
+    if len(path) < 3:
+        return 0.0
+    vs: list[float] = []
+    ts_mid: list[float] = []
+    for a, b in zip(path, path[1:]):
+        dt = b.t - a.t
+        if dt <= 0:
+            continue
+        vs.append(math.hypot(b.x - a.x, b.y - a.y) / dt)
+        ts_mid.append(0.5 * (a.t + b.t))
+    if not vs:
+        return 0.0
+    v_mean = sum(vs) / len(vs)
+    if v_mean <= _EPS_REL:
+        return 0.0
+    span = ts_mid[-1] - ts_mid[0]
+    if span <= 0:
+        return 1.0
+    cutoff = ts_mid[-1] - span * _TAIL_FRAC
+    tail = [v for v, t in zip(vs, ts_mid) if t >= cutoff]
+    if not tail:
+        return 1.0
+    return (sum(tail) / len(tail)) / v_mean
+
+
+def _decel_time_ratio(path: list[PathPoint]) -> float:
+    """Fraction of total time spent after the peak-velocity sample.
+
+    Bell-shaped speed profile -> ~0.5 (roughly equal accel/decel).
+    Ramp that peaks near the end -> ~0.
+    """
+    if len(path) < 3:
+        return 0.0
+    vs: list[float] = []
+    ts_mid: list[float] = []
+    for a, b in zip(path, path[1:]):
+        dt = b.t - a.t
+        if dt <= 0:
+            continue
+        vs.append(math.hypot(b.x - a.x, b.y - a.y) / dt)
+        ts_mid.append(0.5 * (a.t + b.t))
+    if not vs:
+        return 0.0
+    span = ts_mid[-1] - ts_mid[0]
+    if span <= 0:
+        return 0.0
+    peak_idx = max(range(len(vs)), key=vs.__getitem__)
+    return (ts_mid[-1] - ts_mid[peak_idx]) / span
+
+
+def _ends_near_edge(path: list[PathPoint]) -> int:
+    """1 if the final touch sample is within _EDGE_MARGIN of any screen edge.
+
+    Index-finger flicks frequently slide off the edge; thumbs generally
+    stop within the reachable arc. Coordinates are already normalized to
+    [0, 1], so the check is a straight compare.
+    """
+    if not path:
+        return 0
+    p = path[-1]
+    if p.x <= _EDGE_MARGIN or p.x >= 1.0 - _EDGE_MARGIN:
+        return 1
+    if p.y <= _EDGE_MARGIN or p.y >= 1.0 - _EDGE_MARGIN:
+        return 1
+    return 0
+
 
 def compute(scroll: Scroll) -> Features:
     path = scroll.path
@@ -305,6 +387,9 @@ def compute(scroll: Scroll) -> Features:
     disp_y_ratio = total_dy / length if length > _EPS_REL else 0.0
     bbox_sum = max_dx + max_dy
     bbox_aspect = max_dx / bbox_sum if bbox_sum > _EPS_REL else 0.0
+    tail_v_ratio = _tail_velocity_ratio(path)
+    decel_ratio = _decel_time_ratio(path)
+    edge_flag = _ends_near_edge(path)
 
     return Features(
         length=length,
@@ -332,4 +417,7 @@ def compute(scroll: Scroll) -> Features:
         disp_ratio_x=disp_x_ratio,
         disp_ratio_y=disp_y_ratio,
         bbox_aspect=bbox_aspect,
+        tail_velocity_ratio=tail_v_ratio,
+        decel_time_ratio=decel_ratio,
+        ends_near_edge=edge_flag,
     )
